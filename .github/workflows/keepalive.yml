@@ -1,0 +1,16 @@
+name: Keep Render MCP Alive 24-7
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/14 * * * *'
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Health Endpoint
+        run: |
+          if [ -n "${{ secrets.RENDER_URL }}" ]; then
+            TARGET="${{ secrets.RENDER_URL }}"
+            TARGET="${TARGET%/}"
+            curl -s -S -f "${TARGET}/health" || true
+          fi
