@@ -87,10 +87,6 @@ def _http_get(url: str, params: dict = None, headers: dict = None, timeout: int 
             pass
     return requests.get(url, params=params, headers=hdrs, timeout=timeout)
 
-# =====================================================================
-# 1. محرك Reddit المعماري الثلاثي (Arctic Shift + PullPush — مقاوم لحظر 403 السحابي)
-# =====================================================================
-
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def reddit_deep_search(query: str, subreddit: str = "", sort: str = "desc", limit: int = 40, page: int = 1) -> str:
     """Searches Reddit posts and discussions across all subreddits or a specific subreddit using datacenter-safe Arctic Shift and PullPush APIs.
@@ -103,7 +99,6 @@ def reddit_deep_search(query: str, subreddit: str = "", sort: str = "desc", limi
     posts = []
     seen_ids = set()
 
-    # المسار 1: Arctic Shift API
     try:
         as_params = {"query": query, "limit": min(limit, 100), "sort": sort}
         if clean_sub and clean_sub.lower() != "all":
@@ -126,7 +121,6 @@ def reddit_deep_search(query: str, subreddit: str = "", sort: str = "desc", limi
     except Exception:
         pass
 
-    # المسار 2: PullPush API (لضمان التغطية الكاملة)
     if len(posts) < 15:
         try:
             pp_params = {"q": query, "size": min(limit, 50)}
@@ -165,7 +159,6 @@ def reddit_get_full_thread(post_id_or_url: str, page: int = 1) -> str:
     comments = []
     seen_cids = set()
 
-    # سحب بيانات المنشور الأصلي
     try:
         pr = _http_get(f"https://arctic-shift.photon-reddit.com/api/posts/ids?ids={pid}", timeout=12)
         if pr.status_code == 200 and pr.json().get("data"):
@@ -180,7 +173,6 @@ def reddit_get_full_thread(post_id_or_url: str, page: int = 1) -> str:
     except Exception:
         pass
 
-    # سحب شجرة التعليقات من Arctic Shift
     try:
         cr = _http_get("https://arctic-shift.photon-reddit.com/api/comments/search", params={"link_id": f"t3_{pid}", "limit": 100, "sort": "desc"}, timeout=15)
         if cr.status_code == 200:
@@ -193,7 +185,6 @@ def reddit_get_full_thread(post_id_or_url: str, page: int = 1) -> str:
     except Exception:
         pass
 
-    # مسار PullPush الاحتياطي للتعليقات
     if len(comments) < 10:
         try:
             cr2 = _http_get("https://api.pullpush.io/reddit/comment/search/", params={"link_id": pid, "size": 100}, timeout=15)
@@ -209,10 +200,6 @@ def reddit_get_full_thread(post_id_or_url: str, page: int = 1) -> str:
 
     return _paginate_items(cache_key, comments, page=page, extra_meta={"post": post_meta, "total_comments": len(comments)})
 
-# =====================================================================
-# 2. محرك YouTube الخارق (Innertube ANDROID_VR Quest 3: النص المفرغ + الوصف + التعليقات بدون حظر IP)
-# =====================================================================
-
 def _extract_yt_id(url_or_id: str) -> str:
     m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})", url_or_id)
     if m:
@@ -222,7 +209,6 @@ def _extract_yt_id(url_or_id: str) -> str:
     return ""
 
 def _fetch_yt_comments_innertube(video_id: str, max_comments: int = 40) -> list:
-    """Fetches top YouTube viewer comments and pinned comments directly via Innertube /youtubei/v1/next without requiring an API key."""
     web_ctx = {"client": {"clientName": "WEB", "clientVersion": "2.20261028.01.00", "hl": "en", "gl": "US"}}
     try:
         r1 = requests.post(
@@ -233,11 +219,9 @@ def _fetch_yt_comments_innertube(video_id: str, max_comments: int = 40) -> list:
         )
         if r1.status_code != 200:
             return []
-        text1 = r1.text
-        tokens = re.findall(r'"continuationCommand":\{"token":"([^"]+)"', text1)
+        tokens = re.findall(r'"continuationCommand":\{"token":"([^"]+)"', r1.text)
         if not tokens:
             return []
-        # الرمز الأخير عادة هو رمز تحميل قسم التعليقات
         comment_token = tokens[-1]
         r2 = requests.post(
             "https://www.youtube.com/youtubei/v1/next?prettyPrint=false",
@@ -274,7 +258,6 @@ def youtube_deep_inspect(video_url_or_query: str, lang: str = "en", page: int = 
     if page > 1 and cache_key in _PAGE_CACHE:
         return _paginate_items(cache_key, [], page=page, extra_meta={"target": video_url_or_query})
 
-    # إذا أعطى المستخدم كلمات بحث بدلاً من رابط فيديو، نبحث عن أفضل الفيديوهات ونفحص الأول تلقائياً
     search_results = []
     if not vid and DDGS is not None:
         try:
@@ -331,7 +314,6 @@ def youtube_deep_inspect(video_url_or_query: str, lang: str = "en", page: int = 
     if search_results:
         meta["related_videos"] = search_results[:5]
 
-    # استخراج النص المفرغ (Transcript) عبر رابط ANDROID_VR الموقع
     transcript_segments = []
     tracks = pdata.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
     if tracks:
@@ -349,21 +331,19 @@ def youtube_deep_inspect(video_url_or_query: str, lang: str = "en", page: int = 
                     for node in root.findall(".//text"):
                         start_sec = float(node.attrib.get("start", "0"))
                         mm, ss = divmod(int(start_sec), 60)
-                        clean_txt = html.unescape("".join(node.itertext())).replace("
-", " ").strip()
+                        raw_txt = html.unescape("".join(node.itertext()))
+                        clean_txt = " ".join(raw_txt.split())
                         if clean_txt:
                             transcript_segments.append({"t": f"{mm:02d}:{ss:02d}", "c": clean_txt})
                 except Exception:
                     pass
 
-    # استخراج تعليقات المشاهدين تحت الفيديو
     comments = _fetch_yt_comments_innertube(vid, max_comments=40)
 
     combined_items = []
     if comments:
         combined_items.append({"section": "VIEWER_COMMENTS", "count": len(comments), "comments": comments})
     if transcript_segments:
-        # دمج كل 6 جمل متتالية لتقليل حجم الهياكل مع الحفاظ على التوقيت والنص الكامل 100%
         chunked_transcript = []
         for i in range(0, len(transcript_segments), 6):
             batch = transcript_segments[i:i+6]
@@ -374,10 +354,6 @@ def youtube_deep_inspect(video_url_or_query: str, lang: str = "en", page: int = 
         combined_items.extend(chunked_transcript)
 
     return _paginate_items(cache_key, combined_items, page=page, extra_meta=meta)
-
-# =====================================================================
-# 3. محرك TikTok (البحث + تفاصيل الفيديو + تعليقات الناس عبر بوابة tikwm المجانية)
-# =====================================================================
 
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def tiktok_deep_inspect(query_or_url: str, page: int = 1) -> str:
@@ -433,14 +409,9 @@ def tiktok_deep_inspect(query_or_url: str, page: int = 1) -> str:
 
     return _paginate_items(cache_key, items, page=page, extra_meta={"query_or_url": query_or_url})
 
-# =====================================================================
-# 4. محرك Telegram الآمن 100% (قراءة وبحث القنوات العامة والملفات عبر t.me/s/ بدون حساب)
-# =====================================================================
-
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def telegram_public_search(channel_or_topic: str, search_query: str = "", page: int = 1) -> str:
-    """Reads and searches public Telegram channels (e.g. Android RE, Frida, MT Manager, news channels) via t.me/s/ with zero risk to personal accounts.
-    If channel_or_topic is a channel username (e.g. 'Termux' or '@ channel'), reads its posts directly; otherwise searches across public Telegram channels."""
+    """Reads and searches public Telegram channels (e.g. Android RE, Frida, MT Manager, news channels) via t.me/s/ with zero risk to personal accounts."""
     cache_key = f"tg:{channel_or_topic}:{search_query}"
     if page > 1 and cache_key in _PAGE_CACHE:
         return _paginate_items(cache_key, [], page=page, extra_meta={"target": channel_or_topic})
@@ -451,7 +422,6 @@ def telegram_public_search(channel_or_topic: str, search_query: str = "", page: 
         clean_target = m_ch.group(1)
 
     posts = []
-    # إذا كان اسم قناة صالحاً (بدون مسافات) نسحب من t.me/s/ مباشرة
     if re.fullmatch(r"[A-Za-z0-9_]{4,64}", clean_target):
         url = f"https://t.me/s/{clean_target}"
         params = {"q": search_query} if search_query else {}
@@ -463,8 +433,7 @@ def telegram_public_search(channel_or_topic: str, search_query: str = "", page: 
                 date_el = msg.select_one("time.time")
                 link_el = msg.select_one(".tgme_widget_message_date")
                 doc_el = msg.select_one(".tgme_widget_message_document_title")
-                txt = text_el.get_text("
-", strip=True) if text_el else ""
+                txt = text_el.get_text(" ", strip=True) if text_el else ""
                 doc_title = doc_el.get_text(strip=True) if doc_el else ""
                 if txt or doc_title:
                     item = {
@@ -476,7 +445,6 @@ def telegram_public_search(channel_or_topic: str, search_query: str = "", page: 
                         item["attached_file"] = doc_title
                     posts.append(item)
 
-    # إذا كان بحثاً عاماً أو لم توجد القناة مباشرة، نبحث عبر جميع قنوات تيليجرام العامة المفهرسة
     if not posts and DDGS is not None:
         try:
             q_full = f"site:t.me/s/ {channel_or_topic} {search_query}".strip()
@@ -488,10 +456,6 @@ def telegram_public_search(channel_or_topic: str, search_query: str = "", page: 
 
     return _paginate_items(cache_key, posts, page=page, extra_meta={"channel_or_topic": channel_or_topic, "search_query": search_query, "total_messages": len(posts)})
 
-# =====================================================================
-# 5. ترسانة الهندسة العكسية والمطورين (Frida CodeShare + StackOverflow + Hacker News + APK Releases)
-# =====================================================================
-
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def re_and_dev_search(query: str, target: str = "all", page: int = 1) -> str:
     """Searches Android Reverse Engineering & Developer sources: Frida CodeShare scripts, StackOverflow accepted answers, Hacker News, XDA, and 4PDA."""
@@ -502,7 +466,6 @@ def re_and_dev_search(query: str, target: str = "all", page: int = 1) -> str:
     results = []
     t_low = target.lower()
 
-    # 1. StackOverflow / StackExchange API (مع النص الكامل)
     if t_low in ("all", "stackoverflow", "so"):
         try:
             so_r = _http_get(
@@ -517,13 +480,11 @@ def re_and_dev_search(query: str, target: str = "all", page: int = 1) -> str:
                         "title": html.unescape(item.get("title", "")),
                         "is_answered": item.get("is_answered"),
                         "url": item.get("link"),
-                        "body_excerpt": BeautifulSoup(item.get("body", ""), "html.parser").get_text("
-", strip=True)[:2500]
+                        "body_excerpt": BeautifulSoup(item.get("body", ""), "html.parser").get_text(" ", strip=True)[:2500]
                     })
         except Exception:
             pass
 
-    # 2. Hacker News Algolia API
     if t_low in ("all", "hn", "hackernews"):
         try:
             hn_r = _http_get("https://hn.algolia.com/api/v1/search", params={"query": query, "hitsPerPage": 10}, timeout=12)
@@ -533,13 +494,11 @@ def re_and_dev_search(query: str, target: str = "all", page: int = 1) -> str:
                         "source": "HackerNews",
                         "title": hit.get("title") or hit.get("story_title"),
                         "url": hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID')}",
-                        "comment_text": BeautifulSoup(hit.get("comment_text") or "", "html.parser").get_text("
-", strip=True)[:1500]
+                        "comment_text": BeautifulSoup(hit.get("comment_text") or "", "html.parser").get_text(" ", strip=True)[:1500]
                     })
         except Exception:
             pass
 
-    # 3. Frida CodeShare & XDA / 4PDA
     if DDGS is not None and t_low in ("all", "frida", "xda", "4pda"):
         try:
             with DDGS() as ddgs:
@@ -547,7 +506,6 @@ def re_and_dev_search(query: str, target: str = "all", page: int = 1) -> str:
                 for h in list(ddgs.text(dork, max_results=15)):
                     href = h.get("href", "")
                     entry = {"source": "RE_Community", "title": h.get("title"), "snippet": h.get("body"), "url": href}
-                    # إذا كان رابط سكربت في Frida CodeShare نسحب كود الجافاسكربت الكامل تلقائياً!
                     if "codeshare.frida.re/@" in href:
                         try:
                             fr_page = _http_get(href, timeout=12)
@@ -569,7 +527,6 @@ def apk_and_release_inspector(query_or_repo: str) -> str:
     """Finds the latest APK, binary releases, changelogs, and direct download URLs from GitHub Releases, F-Droid, and PyPI."""
     out = {"query": query_or_repo, "releases": []}
 
-    # 1. إذا كان بصيغة owner/repo نفحص أحدث إصداراته مباشرة من GitHub Releases
     if "/" in query_or_repo and " " not in query_or_repo.strip():
         r = _http_get(f"https://api.github.com/repos/{query_or_repo.strip().strip('/')}/releases?per_page=5", timeout=15)
         if r.status_code == 200:
@@ -583,7 +540,6 @@ def apk_and_release_inspector(query_or_repo: str) -> str:
                     "assets": [{"name": a.get("name"), "size_mb": round(a.get("size", 0)/1048576, 2), "download_url": a.get("browser_download_url")} for a in rel.get("assets", [])]
                 })
 
-    # 2. البحث في F-Droid API الرسمي عن حزم الأندرويد مفتوحة المصدر
     try:
         fd_r = _http_get("https://search.f-droid.org/api/search_apps", params={"q": query_or_repo}, timeout=12)
         if fd_r.status_code == 200:
